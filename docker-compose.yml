@@ -1,0 +1,35 @@
+# Local stack: docker compose up --build
+#   Dashboard: http://localhost:${FRONTEND_PORT:-8080}
+#   API:       http://localhost:${BACKEND_PORT:-8000}  (health: /health, docs: /docs)
+services:
+  backend:
+    build: ./backend
+    environment:
+      DATA_MODE: ${DATA_MODE:-live}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      DEFAULT_CUTOFF_DAY_OFFSET: ${DEFAULT_CUTOFF_DAY_OFFSET:-1}
+      DEFAULT_CUTOFF_TIME: ${DEFAULT_CUTOFF_TIME:-09:00}
+      CACHE_TTL_HOURS: ${CACHE_TTL_HOURS:-0}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      WARM_ON_STARTUP: "true"
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - elexon-cache:/data/cache   # downloaded January 2026 dataset survives restarts
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Resolved by the user's browser, so it must be the host-published backend URL.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  elexon-cache:
