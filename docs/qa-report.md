@@ -1,5 +1,18 @@
 # QA Report (Phase 7)
 
+## Update 2026-10-28: decision-date scope, after-start rule, error range
+Re-verified after three changes:
+1. Scope is defined by **decision dates** (January 2026). Day-ahead decisions now cover deliveries on 2 Jan – 1 Feb, not 1–31 Jan.
+2. A forecast must also be published **at or before the start of its delivery hour**. Before this fix, a same-day 07:00 cutoff used versions published after the hour began in 155 of 744 hours (370 of 744 for 12:00), which flattered same-day accuracy.
+3. A new **error distribution** (percentiles, 50/80/90 % ranges, within-±X shares, histogram), with an 80 % band on the chart.
+
+`scripts/qa_verify.py` now independently checks all three, across 6 scenarios plus 5 spot checks. **ALL CHECKS PASSED** (see [qa-verify-output.txt](qa-verify-output.txt)). Automated tests: 92 backend, 15 frontend.
+
+Corrected headline (decisions 1–31 Jan, D-1 09:00 → deliveries 2 Jan – 1 Feb): MAE 2,022 MW · RMSE 2,497 MW · MBE +1,746 MW · WAPE 17.9 % · coverage 100 % · 80 % of hours: actual between 4,154 MW below and 426 MW above the forecast · forecast above actual in 84.7 % of hours.
+
+The sections below describe the original Phase 7 run.
+
+
 Date: 2026-10-28 · Data: live Elexon download (312 WINDFOR publications, 1,584 FUELHH WIND half-hours)
 
 ## Correctness: independent recomputation

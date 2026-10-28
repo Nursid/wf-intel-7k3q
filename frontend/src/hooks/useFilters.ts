@@ -7,7 +7,10 @@ import type { MetaResponse } from '../types/api'
 export function useFilters(meta: MetaResponse | undefined) {
   const [sp, setSp] = useSearchParams()
   const defaults = useMemo(() => (meta ? defaultFilters(meta) : undefined), [meta])
-  const filters = useMemo(() => (defaults ? filtersFromSearch(sp, defaults) : undefined), [sp, defaults])
+  const filters = useMemo(
+    () => (defaults && meta ? filtersFromSearch(sp, defaults, meta.max_day_offset) : undefined),
+    [sp, defaults, meta],
+  )
   const at = sp.get('at') ?? undefined
 
   const apply = useCallback(

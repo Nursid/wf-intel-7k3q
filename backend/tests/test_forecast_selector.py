@@ -15,7 +15,7 @@ from app.services.forecast_selector import (
 )
 from tests.conftest import actuals_df, forecasts_df, ts
 
-D1_0900 = CutoffPolicy(mode="relative", day_offset=1, local_time=time(9, 0))
+D1_0900 = CutoffPolicy(day_offset=1, local_time=time(9, 0))
 T = "2026-01-02T12:00Z"  # delivery; cutoff under D1_0900 = 2026-01-01T09:00Z (GMT)
 
 
@@ -77,17 +77,35 @@ def test_multiple_intervals_each_use_their_own_cutoff():
     assert out.loc[ts(t2), "eligible_versions"] == 2
 
 
-def test_absolute_policy_applies_one_decision_time():
-    p = CutoffPolicy(mode="absolute", decision_at=datetime(2026, 1, 1, 12, tzinfo=timezone.utc))
-    f = forecasts_df([(T, "2026-01-01T11:30Z", 1), (T, "2026-01-01T12:30Z", 2)])
-    assert select_forecasts(f, grid(T), p).iloc[0].forecast_mw == 1
+def test_forecast_published_after_delivery_start_is_never_used():
+    """Same-day cutoff: a version published after the hour began is an observation, not a forecast."""
+    p = CutoffPolicy(day_offset=0, local_time=time(12, 0))  # cutoff 2026-01-02T12:00Z
+    early = "2026-01-02T03:00Z"
+    f = forecasts_df([
+        (early, "2026-01-01T22:30Z", 100),  # before the hour: eligible
+        (early, "2026-01-02T02:30Z", 110),  # before the hour: eligible, latest
+        (early, "2026-01-02T04:30Z", 999),  # before cutoff but AFTER delivery start: excluded
+    ])
+    out = select_forecasts(f, grid(early), p).iloc[0]
+    assert out.forecast_mw == 110 and out.eligible_versions == 2 and out.total_versions == 3
+    assert out.horizon_minutes > 0
 
 
-def test_absolute_policy_requires_aware_decision_time():
+def test_forecast_published_exactly_at_delivery_start_is_eligible():
+    p = CutoffPolicy(day_offset=0, local_time=time(12, 0))
+    f = forecasts_df([("2026-01-02T03:00Z", "2026-01-02T03:00Z", 5)])
+    assert select_forecasts(f, grid("2026-01-02T03:00Z"), p).iloc[0].forecast_mw == 5
+
+
+def test_delivery_dates_follow_decision_dates():
+    assert D1_0900.delivery_dates(date(2026, 1, 1), date(2026, 1, 31)) == (date(2026, 1, 2), date(2026, 2, 1))
+    assert CutoffPolicy(day_offset=0).delivery_dates(date(2026, 1, 5), date(2026, 1, 5)) == (date(2026, 1, 5),) * 2
+    assert D1_0900.describe() == "D-1 at 09:00 Europe/London"
+
+
+def test_negative_offset_rejected():
     with pytest.raises(ValueError):
-        CutoffPolicy(mode="absolute", decision_at=datetime(2026, 1, 1, 12))
-    with pytest.raises(ValueError):
-        CutoffPolicy(mode="absolute")
+        CutoffPolicy(day_offset=-1)
 
 
 # 4 & 5. missing records and matching on delivery interval
@@ -156,6 +174,15 @@ def test_forecast_versions_flags_eligibility_and_selection():
     assert list(v["forecast_mw"]) == [100, 200, 300]
     assert list(v["eligible"]) == [True, True, False]
     assert list(v["selected"]) == [False, True, False]
+    assert list(v["ineligible_reason"]) == [None, None, "AFTER_CUTOFF"]
+
+
+def test_forecast_versions_reason_after_delivery_start():
+    p = CutoffPolicy(day_offset=0, local_time=time(12, 0))
+    f = forecasts_df([("2026-01-02T03:00Z", "2026-01-02T02:30Z", 1), ("2026-01-02T03:00Z", "2026-01-02T04:30Z", 2)])
+    v = forecast_versions(f, ts("2026-01-02T03:00Z"), p)
+    assert list(v["ineligible_reason"]) == [None, "AFTER_DELIVERY_START"]
+    assert list(v["selected"]) == [True, False]
 
 
 @pytest.mark.parametrize("offset, hhmm", [(0, "07:00"), (1, "09:00"), (1, "16:30"), (2, "09:00")])
@@ -170,7 +197,12 @@ def test_invariant_on_real_fixture_never_selects_post_cutoff(offset, hhmm):
     sel = select_forecasts(ds.forecasts, grid_, policy)
     picked = sel.dropna(subset=["publish_time_utc"])
     assert (picked["publish_time_utc"] <= picked["cutoff_utc"]).all()
+    assert (picked["publish_time_utc"] <= picked["start_time_utc"]).all()
     # and it is the latest eligible version
     for row in picked.itertuples():
-        v = ds.forecasts[(ds.forecasts.start_time_utc == row.start_time_utc) & (ds.forecasts.publish_time_utc <= row.cutoff_utc)]
+        v = ds.forecasts[
+            (ds.forecasts.start_time_utc == row.start_time_utc)
+            & (ds.forecasts.publish_time_utc <= row.cutoff_utc)
+            & (ds.forecasts.publish_time_utc <= row.start_time_utc)
+        ]
         assert row.publish_time_utc == v.publish_time_utc.max()

@@ -34,9 +34,9 @@ def actuals_df(rows: list[tuple[str, float]]) -> pd.DataFrame:
 
 # ---------------------------------------------------------------- synthetic "Elexon" source for API tests
 
-SYN_START = datetime(2026, 1, 1, tzinfo=timezone.utc)
-MISSING_FORECAST_HOUR = datetime(2026, 1, 2, 5, tzinfo=timezone.utc)
-MISSING_ACTUAL_HOUR = datetime(2026, 1, 2, 6, tzinfo=timezone.utc)
+SYN_START = datetime(2026, 1, 2, tzinfo=timezone.utc)
+MISSING_FORECAST_HOUR = datetime(2026, 1, 3, 5, tzinfo=timezone.utc)
+MISSING_ACTUAL_HOUR = datetime(2026, 1, 3, 6, tzinfo=timezone.utc)
 
 
 def _z(dt: datetime) -> str:
@@ -44,14 +44,15 @@ def _z(dt: datetime) -> str:
 
 
 def synthetic_raw() -> tuple[list[dict], list[dict]]:
-    """Deliveries 1-2 Jan 2026 (GMT, so local == UTC).
+    """Deliveries 2-3 Jan 2026, i.e. day-ahead decisions on 1-2 Jan (GMT, so local == UTC).
 
-    Actuals: half-hourly, generation = 1000 + index. The 06:00 slot on 2 Jan is missing.
-    Forecasts per hour, three versions:
-      D-2 08:00Z -> actual + 100
-      D-1 08:30Z -> actual + 50   (latest before the default cutoff D-1 09:00)
-      D-1 10:00Z -> actual + 10   (after cutoff: must never be selected under the default)
-    The 05:00 hour on 2 Jan has no forecasts.
+    Actuals: half-hourly, generation = 1000 + index. The 06:00 slot on 3 Jan is missing.
+    Forecasts per hour, four versions:
+      D-2 08:00Z     -> actual + 100
+      D-1 08:30Z     -> actual + 50   (latest before the default cutoff D-1 09:00)
+      D-1 10:00Z     -> actual + 10   (after cutoff: never selected under the default)
+      start + 30 min -> actual + 1    ("nowcast" published after the hour began: never eligible)
+    The 05:00 hour on 3 Jan has no forecasts.
     """
     actuals, forecasts = [], []
     for i in range(96):
@@ -69,7 +70,8 @@ def synthetic_raw() -> tuple[list[dict], list[dict]]:
         day = start.replace(hour=0)
         for pub, delta in ((day - timedelta(days=2, hours=-8), 100),
                            (day - timedelta(days=1, hours=-8, minutes=-30), 50),
-                           (day - timedelta(days=1, hours=-10), 10)):
+                           (day - timedelta(days=1, hours=-10), 10),
+                           (start + timedelta(minutes=30), 1)):
             forecasts.append({"startTime": _z(start), "publishTime": _z(pub), "generation": base + delta})
     return actuals, forecasts
 
@@ -104,8 +106,8 @@ def settings(tmp_path) -> Settings:
         _env_file=None,
         cache_dir=tmp_path / "cache",
         data_mode="live",
-        analysis_start_date=date(2026, 1, 1),
-        analysis_end_date=date(2026, 1, 31),
+        decision_start_date=date(2026, 1, 1),
+        decision_end_date=date(2026, 1, 31),
         admin_token="secret",
     )
 

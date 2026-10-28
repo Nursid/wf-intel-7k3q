@@ -1,8 +1,8 @@
-import { Check, RotateCcw, SlidersHorizontal } from 'lucide-react'
+import { ArrowRight, Check, RotateCcw, SlidersHorizontal } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import { cn } from '../../lib/cn'
-import { DAY_OFFSET_OPTIONS, rangePresets, sameFilters, validateFilters, type Filters } from '../../lib/filters'
-import type { CutoffMode, MetaResponse } from '../../types/api'
+import { DAY_OFFSET_OPTIONS, deliveryDates, rangePresets, sameFilters, validateFilters, type Filters } from '../../lib/filters'
+import { formatDateRange } from '../../lib/format'
+import type { MetaResponse } from '../../types/api'
 import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
 import { Field, Input, Select } from '../ui/Field'
@@ -25,7 +25,9 @@ export function FilterBar({ meta, applied, defaults, onApply, onReset }: FilterB
   const isDefault = sameFilters(applied, defaults) && !dirty
   const presets = rangePresets(meta)
   const preset = presets.find((p) => p.start === draft.start && p.end === draft.end)
+  const offsets = DAY_OFFSET_OPTIONS.filter((o) => o.value <= meta.max_day_offset)
   const set = (patch: Partial<Filters>) => setDraft((d) => ({ ...d, ...patch }))
+  const [delFrom, delTo] = deliveryDates(draft)
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -41,8 +43,8 @@ export function FilterBar({ meta, applied, defaults, onApply, onReset }: FilterB
         </div>
 
         <fieldset className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-3">
-          <legend className="sr-only">Delivery period</legend>
-          <Field label="Quick range">
+          <legend className="sr-only">Decision dates</legend>
+          <Field label="Decision dates">
             {(id) => (
               <Select
                 id={id}
@@ -63,99 +65,82 @@ export function FilterBar({ meta, applied, defaults, onApply, onReset }: FilterB
               </Select>
             )}
           </Field>
-          <Field label="Delivery from" error={errors.start}>
+          <Field label="Decided from" error={errors.start}>
             {(id, d) => (
               <Input
                 id={id}
                 aria-describedby={d}
                 aria-invalid={!!errors.start}
                 type="date"
-                min={meta.available_start_date}
-                max={meta.available_end_date}
+                min={meta.decision_start_date}
+                max={meta.decision_end_date}
                 value={draft.start}
                 required
                 onChange={(e) => set({ start: e.target.value })}
               />
             )}
           </Field>
-          <Field label="Delivery to" error={errors.end}>
+          <Field label="Decided to" error={errors.end}>
             {(id, d) => (
               <Input
                 id={id}
                 aria-describedby={d}
                 aria-invalid={!!errors.end}
                 type="date"
-                min={meta.available_start_date}
-                max={meta.available_end_date}
+                min={meta.decision_start_date}
+                max={meta.decision_end_date}
                 value={draft.end}
                 required
                 onChange={(e) => set({ end: e.target.value })}
               />
             )}
           </Field>
+          <p className="flex items-center gap-1.5 text-xs text-ink-muted sm:col-span-3">
+            <ArrowRight className="size-3.5 text-ink-subtle" aria-hidden />
+            Covers deliveries on <strong className="font-medium text-ink">{valid || !errors.start ? formatDateRange(delFrom, delTo) : '—'}</strong>
+          </p>
         </fieldset>
 
         <div aria-hidden className="hidden w-px self-stretch bg-border xl:block" />
 
         <fieldset className="flex flex-1 flex-col gap-3">
           <legend className="sr-only">Decision cutoff</legend>
-          <div className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
-            Decision cutoff (Europe/London)
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(12rem,1fr)_minmax(7rem,9rem)]">
+            <Field label="Buying for delivery">
+              {(id) => (
+                <Select id={id} value={draft.offset} onChange={(e) => set({ offset: Number(e.target.value) })}>
+                  {offsets.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+            <Field label="Decision time (UK)" error={errors.time}>
+              {(id, d) => (
+                <Input
+                  id={id}
+                  aria-describedby={d}
+                  type="time"
+                  step={60}
+                  value={draft.time}
+                  required
+                  onChange={(e) => set({ time: e.target.value })}
+                />
+              )}
+            </Field>
+          </div>
+          <p className="flex items-start gap-1.5 text-xs text-ink-subtle">
+            <span>
+              Each delivery hour uses the latest forecast published by {draft.time || '--:--'} on{' '}
+              {offsets.find((o) => o.value === draft.offset)?.phrase ?? `D-${draft.offset}`}, and never one published after
+              the hour began.
+            </span>
             <InfoTip>
-              Only forecasts published at or before this moment are used. The default ({meta.default_cutoff.description}) is
-              a pilot assumption, not a market deadline.
+              The default ({meta.default_cutoff.description}) is a pilot assumption, not a market deadline. Confirm it against
+              the day-ahead auction the team uses.
             </InfoTip>
-          </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[auto_minmax(11.5rem,1fr)_minmax(7rem,9rem)]">
-            <ModeToggle value={draft.mode} onChange={(mode) => set({ mode })} />
-            {draft.mode === 'relative' ? (
-              <>
-                <Field label="Decision day" className="[&>label]:sr-only">
-                  {(id) => (
-                    <Select id={id} value={draft.offset} onChange={(e) => set({ offset: Number(e.target.value) })}>
-                      {DAY_OFFSET_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                </Field>
-                <Field label="Decision time" className="[&>label]:sr-only" error={errors.time}>
-                  {(id, d) => (
-                    <Input
-                      id={id}
-                      aria-describedby={d}
-                      type="time"
-                      step={60}
-                      value={draft.time}
-                      required
-                      onChange={(e) => set({ time: e.target.value })}
-                    />
-                  )}
-                </Field>
-              </>
-            ) : (
-              <Field label="Decision date and time" className="sm:col-span-2 [&>label]:sr-only" error={errors.decision}>
-                {(id, d) => (
-                  <Input
-                    id={id}
-                    aria-describedby={d}
-                    type="datetime-local"
-                    value={draft.decision}
-                    required
-                    onChange={(e) => set({ decision: e.target.value })}
-                  />
-                )}
-              </Field>
-            )}
-          </div>
-          <p className="text-xs text-ink-subtle">
-            {draft.mode === 'relative'
-              ? `Each delivery hour uses the latest forecast published by ${draft.time || '--:--'} on ${
-                  DAY_OFFSET_OPTIONS.find((o) => o.value === draft.offset)?.phrase ?? `D-${draft.offset}`
-                } (Europe/London).`
-              : 'One fixed decision moment applies to every delivery hour in the period.'}
           </p>
         </fieldset>
 
@@ -177,31 +162,5 @@ export function FilterBar({ meta, applied, defaults, onApply, onReset }: FilterB
         </div>
       </form>
     </Card>
-  )
-}
-
-function ModeToggle({ value, onChange }: { value: CutoffMode; onChange: (m: CutoffMode) => void }) {
-  const options: { v: CutoffMode; label: string }[] = [
-    { v: 'relative', label: 'Day-ahead rule' },
-    { v: 'absolute', label: 'Fixed time' },
-  ]
-  return (
-    <div role="radiogroup" aria-label="Cutoff type" className="inline-flex h-9 rounded-lg bg-surface-muted p-0.5 ring-1 ring-border ring-inset">
-      {options.map((o) => (
-        <button
-          key={o.v}
-          type="button"
-          role="radio"
-          aria-checked={value === o.v}
-          onClick={() => onChange(o.v)}
-          className={cn(
-            'rounded-md px-3 text-xs font-medium whitespace-nowrap transition-colors',
-            value === o.v ? 'bg-surface text-ink shadow-sm ring-1 ring-border' : 'text-ink-muted hover:text-ink',
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
   )
 }

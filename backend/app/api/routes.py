@@ -16,6 +16,7 @@ from app.schemas.analysis import (
     DataQuality,
     DatasetInfo,
     DataSourceInfo,
+    ErrorDistribution,
     ErrorResponse,
     ForecastHistoryResponse,
     ForecastVersion,
@@ -42,18 +43,23 @@ from app.services.forecast_selector import (
 router = APIRouter()
 ERRORS = {422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}}
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
-MAX_DAY_OFFSET = 7
 
 COVERAGE_DEFINITION = (
-    "Matched intervals ÷ expected hourly delivery intervals in the selected Europe/London date range. "
-    "WINDFOR forecasts are hourly, so each hour is matched to the FUELHH actual starting at the same time."
+    "Matched intervals ÷ expected hourly delivery intervals for the delivery days covered by the selected "
+    "decision dates (Europe/London). WINDFOR forecasts are hourly, so each hour is matched to the FUELHH "
+    "actual starting at the same time."
 )
 ASSUMPTIONS = [
-    "The default decision cutoff (D-1 at 09:00 Europe/London) is a configurable pilot assumption, "
-    "not a regulatory or trading deadline.",
-    "A forecast published exactly at the cutoff is treated as available; anything later is never used.",
+    "Scope follows the brief: purchase decisions made in January 2026. With the day-ahead default, "
+    "decisions on 1–31 Jan cover deliveries on 2 Jan – 1 Feb.",
+    "The default decision time (D-1 at 09:00 Europe/London) is a configurable pilot assumption, "
+    "not a regulatory or trading deadline. Confirm it against the auction the team uses.",
+    "A forecast is used only if it was published at or before the decision cutoff and at or before the "
+    "start of the delivery hour. Nothing published later is ever used.",
     "WINDFOR is published at hourly resolution, so accuracy is assessed on hourly delivery intervals "
     "against the FUELHH half-hour starting at the same time. Forecasts are not interpolated.",
+    "Error ranges (e.g. P10–P90) are empirical, from the matched hours of the selected period. They "
+    "describe past performance and are not a probabilistic forecast.",
     "Missing forecasts or actuals are excluded from metrics and disclosed. They are never treated as zero.",
     "Scope is national wind only (Elexon FUELHH + WINDFOR). The tool does not recommend purchase volumes.",
 ]
@@ -76,39 +82,29 @@ def _bad(msg: str) -> HTTPException:
 
 def analysis_query(
     settings: Annotated[Settings, Depends(get_settings_dep)],
-    start_date: Annotated[date | None, Query(description="First delivery day, Europe/London")] = None,
-    end_date: Annotated[date | None, Query(description="Last delivery day (inclusive), Europe/London")] = None,
-    cutoff_mode: Annotated[Literal["relative", "absolute"], Query()] = "relative",
-    cutoff_day_offset: Annotated[int | None, Query(description="Days before delivery (relative mode)")] = None,
-    cutoff_time: Annotated[str | None, Query(description="HH:MM Europe/London (relative mode)")] = None,
-    decision_at: Annotated[datetime | None, Query(description="ISO datetime with offset (absolute mode)")] = None,
+    decision_start_date: Annotated[date | None, Query(description="First decision day, Europe/London")] = None,
+    decision_end_date: Annotated[date | None, Query(description="Last decision day (inclusive), Europe/London")] = None,
+    cutoff_day_offset: Annotated[int | None, Query(description="Decide this many days before delivery (1 = day-ahead)")] = None,
+    cutoff_time: Annotated[str | None, Query(description="Decision time HH:MM, Europe/London")] = None,
 ) -> AnalysisQuery:
-    lo, hi = settings.analysis_start_date, settings.analysis_end_date
-    start = start_date or lo
-    end = end_date or hi
+    lo, hi = settings.decision_start_date, settings.decision_end_date
+    start = decision_start_date or lo
+    end = decision_end_date or hi
     if not (lo <= start <= hi) or not (lo <= end <= hi):
-        raise _bad(f"Delivery dates must be between {lo} and {hi}")
+        raise _bad(f"Decision dates must be between {lo} and {hi}")
     if end < start:
-        raise _bad("end_date must be on or after start_date")
+        raise _bad("decision_end_date must be on or after decision_start_date")
 
-    if cutoff_mode == "absolute":
-        if decision_at is None:
-            raise _bad("decision_at is required when cutoff_mode=absolute")
-        if decision_at.tzinfo is None:
-            raise _bad("decision_at must include a timezone offset, e.g. 2026-01-01T09:00:00Z")
-        policy = CutoffPolicy(mode="absolute", decision_at=decision_at)
+    offset = settings.default_cutoff_day_offset if cutoff_day_offset is None else cutoff_day_offset
+    if not 0 <= offset <= settings.max_day_offset:
+        raise _bad(f"cutoff_day_offset must be between 0 and {settings.max_day_offset}")
+    if cutoff_time is None:
+        local_t = settings.default_cutoff_time
+    elif HHMM.match(cutoff_time):
+        local_t = time.fromisoformat(cutoff_time)
     else:
-        offset = settings.default_cutoff_day_offset if cutoff_day_offset is None else cutoff_day_offset
-        if not 0 <= offset <= MAX_DAY_OFFSET:
-            raise _bad(f"cutoff_day_offset must be between 0 and {MAX_DAY_OFFSET}")
-        if cutoff_time is None:
-            local_t = settings.default_cutoff_time
-        elif HHMM.match(cutoff_time):
-            local_t = time.fromisoformat(cutoff_time)
-        else:
-            raise _bad("cutoff_time must be HH:MM (24h)")
-        policy = CutoffPolicy(mode="relative", day_offset=offset, local_time=local_t)
-    return AnalysisQuery(start, end, policy)
+        raise _bad("cutoff_time must be HH:MM (24h)")
+    return AnalysisQuery(start, end, CutoffPolicy(day_offset=offset, local_time=local_t))
 
 
 QueryDep = Annotated[AnalysisQuery, Depends(analysis_query)]
@@ -129,20 +125,20 @@ def _ts(v: Any) -> datetime | None:
 
 
 def policy_out(p: CutoffPolicy) -> CutoffPolicyOut:
-    if p.mode == "absolute":
-        return CutoffPolicyOut(
-            mode="absolute", day_offset=None, local_time=None,
-            decision_at_utc=_ts(pd.Timestamp(p.decision_at).tz_convert("UTC")), description=p.describe(),
-        )
-    return CutoffPolicyOut(
-        mode="relative", day_offset=p.day_offset, local_time=p.local_time.strftime("%H:%M"),
-        decision_at_utc=None, description=p.describe(),
-    )
+    return CutoffPolicyOut(day_offset=p.day_offset, local_time=p.local_time.strftime("%H:%M"), description=p.describe())
 
 
 def period_out(q: AnalysisQuery) -> Period:
-    s, e = local_day_bounds_utc(q.start_date, q.end_date)
-    return Period(start_date=q.start_date, end_date=q.end_date, start_utc=s.to_pydatetime(), end_utc=e.to_pydatetime())
+    d_start, d_end = q.delivery_dates
+    s, e = local_day_bounds_utc(d_start, d_end)
+    return Period(
+        decision_start_date=q.decision_start,
+        decision_end_date=q.decision_end,
+        delivery_start_date=d_start,
+        delivery_end_date=d_end,
+        start_utc=s.to_pydatetime(),
+        end_utc=e.to_pydatetime(),
+    )
 
 
 def data_source_out(service: AnalysisService, dataset: Dataset) -> DataSourceInfo:
@@ -192,14 +188,13 @@ def health(service: ServiceDep, settings: Annotated[Settings, Depends(get_settin
 @router.get("/api/meta", response_model=MetaResponse, responses=ERRORS, tags=["analysis"])
 def meta(service: ServiceDep, settings: Annotated[Settings, Depends(get_settings_dep)]) -> MetaResponse:
     ds = service.repository.get()
-    default = CutoffPolicy(
-        mode="relative", day_offset=settings.default_cutoff_day_offset, local_time=settings.default_cutoff_time
-    )
+    default = CutoffPolicy(day_offset=settings.default_cutoff_day_offset, local_time=settings.default_cutoff_time)
     m = ds.meta
     return MetaResponse(
         product="Wind Forecast Intelligence",
-        available_start_date=settings.analysis_start_date,
-        available_end_date=settings.analysis_end_date,
+        decision_start_date=settings.decision_start_date,
+        decision_end_date=settings.decision_end_date,
+        max_day_offset=settings.max_day_offset,
         default_cutoff=policy_out(default),
         analysis_resolution_minutes=int(ANALYSIS_FREQ.total_seconds() // 60),
         actual_resolution_minutes=int(ACTUAL_FREQ.total_seconds() // 60),
@@ -220,6 +215,7 @@ def overview(q: QueryDep, service: ServiceDep) -> OverviewResponse:
         period=period_out(q),
         cutoff=policy_out(q.policy),
         metrics=Metrics(**r.metrics.as_dict()),
+        error_distribution=ErrorDistribution(**r.distribution) if r.distribution else None,
         data_quality=DataQuality(
             coverage_definition=COVERAGE_DEFINITION,
             analysis_resolution_minutes=int(ANALYSIS_FREQ.total_seconds() // 60),
@@ -233,6 +229,13 @@ def overview(q: QueryDep, service: ServiceDep) -> OverviewResponse:
 @router.get("/api/analysis/timeseries", response_model=TimeseriesResponse, responses=ERRORS, tags=["analysis"])
 def timeseries(q: QueryDep, service: ServiceDep) -> TimeseriesResponse:
     r = service.analyze(q)
+    # Central 80 % range for actual around each forecast: actual = forecast - error.
+    pct = r.distribution["percentiles_mw"] if r.distribution else None
+
+    def band(f: float | None, p: str) -> float | None:
+        # Generation cannot be negative, so the range is floored at 0 MW.
+        return None if f is None or pct is None else max(0.0, f - pct[p])
+
     points = [
         TimeseriesPoint(
             start_time_utc=_ts(row["start_time_utc"]),
@@ -242,6 +245,8 @@ def timeseries(q: QueryDep, service: ServiceDep) -> TimeseriesResponse:
             actual_mw=_num(row["actual_mw"]),
             error_mw=_num(row["error_mw"]),
             status=row["status"],
+            range_low_mw=band(_num(row["forecast_mw"]), "p90"),
+            range_high_mw=band(_num(row["forecast_mw"]), "p10"),
         )
         for row in r.intervals.to_dict("records")
     ]
@@ -288,15 +293,14 @@ def intervals(
 def forecast_history(
     q: QueryDep,
     service: ServiceDep,
-    settings: Annotated[Settings, Depends(get_settings_dep)],
     start_time: Annotated[datetime, Query(description="Delivery interval start, ISO datetime with offset")],
 ) -> ForecastHistoryResponse:
     if start_time.tzinfo is None:
         raise _bad("start_time must include a timezone offset")
     ts = pd.Timestamp(start_time).tz_convert("UTC")
-    lo, hi = local_day_bounds_utc(settings.analysis_start_date, settings.analysis_end_date)
+    lo, hi = local_day_bounds_utc(*q.delivery_dates)
     if not lo <= ts < hi:
-        raise _bad("start_time is outside the supported delivery period")
+        raise _bad("start_time is outside the delivery days covered by the selected decision dates")
     if ts.floor(ANALYSIS_FREQ) != ts:
         raise _bad("start_time must be on an hourly forecast interval boundary")
 
@@ -308,6 +312,7 @@ def forecast_history(
             forecast_mw=float(v["forecast_mw"]),
             eligible=bool(v["eligible"]),
             selected=bool(v["selected"]),
+            ineligible_reason=v["ineligible_reason"],
             minutes_before_cutoff=(pd.Timestamp(cutoff) - v["publish_time_utc"]).total_seconds() / 60,
             horizon_minutes=(ts - v["publish_time_utc"]).total_seconds() / 60,
         )

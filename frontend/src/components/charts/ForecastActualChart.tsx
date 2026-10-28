@@ -1,6 +1,7 @@
 import { LineChart as LineIcon } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import {
+  Area,
   Bar,
   CartesianGrid,
   Cell,
@@ -12,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { addDays, londonWallToUtcIso, type Filters } from '../../lib/filters'
+import { addDays, deliveryDates, londonWallToUtcIso, type Filters } from '../../lib/filters'
 import { formatLocal, formatLocalShort, formatMW, formatSignedMW, LONDON_TZ } from '../../lib/format'
 import type { ApiError } from '../../services/api'
 import type { IntervalStatus, TimeseriesResponse } from '../../types/api'
@@ -38,6 +39,7 @@ interface HourRow {
   error: number | null
   publish: string | null
   status: IntervalStatus
+  range: [number, number] | null // central 80 % range for actual (from the error distribution)
 }
 
 interface Props {
@@ -53,6 +55,8 @@ interface Props {
 
 export function ForecastActualChart({ data, loading, error, onRetry, filters, selected, onSelect, className }: Props) {
   const [showError, setShowError] = useState(false)
+  const [showRange, setShowRange] = useState(true)
+  const [delStart, delEnd] = deliveryDates(filters)
 
   const { hours, halfHours, byHour } = useMemo(() => {
     const hours: HourRow[] = (data?.intervals ?? []).map((p) => ({
@@ -62,17 +66,19 @@ export function ForecastActualChart({ data, loading, error, onRetry, filters, se
       error: p.error_mw,
       publish: p.publish_time_utc,
       status: p.status,
+      range: p.range_low_mw !== null && p.range_high_mw !== null ? [p.range_low_mw, p.range_high_mw] : null,
     }))
     const halfHours = (data?.actuals_half_hourly ?? []).map((a) => ({ t: Date.parse(a.start_time_utc), actual: a.actual_mw }))
     return { hours, halfHours, byHour: new Map(hours.map((h) => [h.t, h])) }
   }, [data])
 
   const domain = useMemo<[number, number]>(
-    () => [Date.parse(londonWallToUtcIso(`${filters.start}T00:00`)), Date.parse(londonWallToUtcIso(`${addDays(filters.end, 1)}T00:00`))],
-    [filters.start, filters.end],
+    () => [Date.parse(londonWallToUtcIso(`${delStart}T00:00`)), Date.parse(londonWallToUtcIso(`${addDays(delEnd, 1)}T00:00`))],
+    [delStart, delEnd],
   )
-  const ticks = useMemo(() => buildTicks(filters.start, filters.end), [filters.start, filters.end])
-  const short = filters.start === filters.end || addDays(filters.start, 1) === filters.end
+  const ticks = useMemo(() => buildTicks(delStart, delEnd), [delStart, delEnd])
+  const short = delStart === delEnd || addDays(delStart, 1) === delEnd
+  const hasRange = hours.some((h) => h.range)
   const hasAny = hours.some((h) => h.forecast !== null || h.actual !== null) || halfHours.length > 0
   const selectedMs = selected ? Date.parse(selected) : undefined
 
@@ -87,20 +93,16 @@ export function ForecastActualChart({ data, loading, error, onRetry, filters, se
             : 'Loading period…'
         }
         action={
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-muted select-none">
-            <input
-              type="checkbox"
-              className="size-3.5 accent-ink"
-              checked={showError}
-              onChange={(e) => setShowError(e.target.checked)}
-            />
-            Show error bars
-          </label>
+          <div className="flex flex-col items-end gap-1 sm:flex-row sm:gap-4">
+            <Toggle checked={showRange} onChange={setShowRange} label="80% range" />
+            <Toggle checked={showError} onChange={setShowError} label="Error bars" />
+          </div>
         }
       />
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-5 pt-3 text-xs text-ink-muted" aria-hidden={!data}>
         <LegendKey dashed color={C.forecast} label="Selected forecast (hourly)" />
         <LegendKey color={C.actual} label="Actual generation (30-min)" />
+        {showRange && hasRange && <LegendKey bar color={C.forecast} soft label="80% range for actual (from past errors)" />}
         {showError && (
           <>
             <LegendKey bar color={C.over} label="Over-forecast" />
@@ -125,7 +127,7 @@ export function ForecastActualChart({ data, loading, error, onRetry, filters, se
           <div
             className={`h-full transition-opacity ${loading ? 'opacity-50' : ''}`}
             role="img"
-            aria-label={`Line chart of selected wind forecast and actual generation in MW, ${filters.start} to ${filters.end}. The interval table below lists every value.`}
+            aria-label={`Line chart of selected wind forecast and actual generation in MW, delivery ${delStart} to ${delEnd}. The interval table below lists every value.`}
           >
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
@@ -176,6 +178,18 @@ export function ForecastActualChart({ data, loading, error, onRetry, filters, se
                   </Bar>
                 )}
                 {selectedMs !== undefined && <ReferenceLine x={selectedMs} stroke={C.ink} strokeOpacity={0.35} strokeDasharray="4 3" />}
+                {showRange && hasRange && (
+                  <Area
+                    dataKey="range"
+                    type="linear"
+                    stroke="none"
+                    fill={C.forecast}
+                    fillOpacity={0.1}
+                    isAnimationActive={false}
+                    connectNulls={false}
+                    activeDot={false}
+                  />
+                )}
                 <Line
                   data={halfHours}
                   dataKey="actual"
@@ -218,6 +232,7 @@ function ChartTooltip({ row }: { row: HourRow }) {
         <TipRow swatch={C.forecast} dashed label="Forecast" value={formatMW(row.forecast)} />
         <TipRow swatch={C.actual} label="Actual" value={formatMW(row.actual)} />
         <TipRow label="Error" value={formatSignedMW(row.error)} strong />
+        {row.range && <TipRow label="80% range" value={`${formatMW(row.range[0], false)}–${formatMW(row.range[1])}`} />}
       </dl>
       <p className="mt-2 border-t border-border pt-2 text-ink-muted">
         {row.publish ? `Published ${formatLocalShort(row.publish)}` : statusText(row.status)}
@@ -246,11 +261,20 @@ function TipRow({ label, value, swatch, dashed, strong }: { label: string; value
   )
 }
 
-function LegendKey({ color, label, dashed, bar }: { color: string; label: string; dashed?: boolean; bar?: boolean }) {
+function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-muted select-none">
+      <input type="checkbox" className="size-3.5 accent-ink" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      {label}
+    </label>
+  )
+}
+
+function LegendKey({ color, label, dashed, bar, soft }: { color: string; label: string; dashed?: boolean; bar?: boolean; soft?: boolean }) {
   return (
     <span className="flex items-center gap-1.5">
       {bar ? (
-        <span className="size-2.5 rounded-sm" style={{ background: color, opacity: 0.6 }} />
+        <span className="size-2.5 rounded-sm" style={{ background: color, opacity: soft ? 0.18 : 0.6 }} />
       ) : (
         <svg width="18" height="4" aria-hidden>
           <line x1="0" y1="2" x2="18" y2="2" stroke={color} strokeWidth="2" strokeDasharray={dashed ? '5 3' : undefined} />

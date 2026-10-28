@@ -1,26 +1,26 @@
-import type { AnalysisParams, CutoffMode, MetaResponse } from '../types/api'
+import type { AnalysisParams, MetaResponse } from '../types/api'
 import { LONDON_TZ } from './format'
 
-/** Dashboard filter state. Wall-clock times are Europe/London; conversion to UTC happens on the way to the API. */
+/**
+ * Dashboard filter state. Scope is defined by *decision* dates (purchase decisions in January 2026);
+ * delivery days follow as decision date + offset. Wall-clock times are Europe/London.
+ */
 export interface Filters {
-  start: string // yyyy-mm-dd
-  end: string
-  mode: CutoffMode
-  offset: number // days before delivery (relative)
-  time: string // HH:MM (relative)
-  decision: string // yyyy-mm-ddTHH:MM London wall time (absolute)
+  start: string // first decision day, yyyy-mm-dd
+  end: string // last decision day
+  offset: number // decide this many days before delivery (1 = day-ahead)
+  time: string // decision time HH:MM
 }
 
 export const DAY_OFFSET_OPTIONS = [
-  { value: 0, label: 'Same day (D-0)', phrase: 'the delivery day' },
-  { value: 1, label: 'Day before (D-1)', phrase: 'the day before delivery' },
-  { value: 2, label: '2 days before (D-2)', phrase: 'two days before delivery' },
-  { value: 3, label: '3 days before (D-3)', phrase: 'three days before delivery' },
+  { value: 1, label: 'Next day (day-ahead)', phrase: 'the day before delivery' },
+  { value: 0, label: 'Same day', phrase: 'the delivery day itself' },
+  { value: 2, label: 'In 2 days', phrase: 'two days before delivery' },
+  { value: 3, label: 'In 3 days', phrase: 'three days before delivery' },
 ]
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/
 const DATE = /^\d{4}-\d{2}-\d{2}$/
-const WALL = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
 
 export function addDays(isoDate: string, days: number): string {
   const d = new Date(`${isoDate}T00:00:00Z`)
@@ -29,19 +29,21 @@ export function addDays(isoDate: string, days: number): string {
 }
 
 export function defaultFilters(meta: MetaResponse): Filters {
-  const c = meta.default_cutoff
   return {
-    start: meta.available_start_date,
-    end: meta.available_end_date,
-    mode: 'relative',
-    offset: c.day_offset ?? 1,
-    time: c.local_time ?? '09:00',
-    decision: `${addDays(meta.available_start_date, -1)}T${c.local_time ?? '09:00'}`,
+    start: meta.decision_start_date,
+    end: meta.decision_end_date,
+    offset: meta.default_cutoff.day_offset,
+    time: meta.default_cutoff.local_time,
   }
 }
 
+/** Delivery days covered by the selected decision days. */
+export function deliveryDates(f: Filters): [string, string] {
+  return [addDays(f.start, f.offset), addDays(f.end, f.offset)]
+}
+
 /** Read filters from the URL, falling back to defaults for anything missing or malformed. */
-export function filtersFromSearch(sp: URLSearchParams, defaults: Filters): Filters {
+export function filtersFromSearch(sp: URLSearchParams, defaults: Filters, maxOffset = 3): Filters {
   const pick = (k: string, re: RegExp, d: string) => {
     const v = sp.get(k)
     return v && re.test(v) ? v : d
@@ -50,10 +52,8 @@ export function filtersFromSearch(sp: URLSearchParams, defaults: Filters): Filte
   return {
     start: pick('from', DATE, defaults.start),
     end: pick('to', DATE, defaults.end),
-    mode: sp.get('mode') === 'absolute' ? 'absolute' : 'relative',
-    offset: sp.has('offset') && Number.isInteger(offset) && offset >= 0 && offset <= 7 ? offset : defaults.offset,
+    offset: sp.has('offset') && Number.isInteger(offset) && offset >= 0 && offset <= maxOffset ? offset : defaults.offset,
     time: pick('time', HHMM, defaults.time),
-    decision: pick('decision', WALL, defaults.decision),
   }
 }
 
@@ -62,48 +62,39 @@ export function filtersToSearch(f: Filters, defaults: Filters): URLSearchParams 
   const sp = new URLSearchParams()
   if (f.start !== defaults.start) sp.set('from', f.start)
   if (f.end !== defaults.end) sp.set('to', f.end)
-  if (f.mode === 'absolute') {
-    sp.set('mode', 'absolute')
-    sp.set('decision', f.decision)
-  } else {
-    if (f.offset !== defaults.offset) sp.set('offset', String(f.offset))
-    if (f.time !== defaults.time) sp.set('time', f.time)
-  }
+  if (f.offset !== defaults.offset) sp.set('offset', String(f.offset))
+  if (f.time !== defaults.time) sp.set('time', f.time)
   return sp
 }
 
 export function validateFilters(f: Filters, meta: MetaResponse): Partial<Record<keyof Filters, string>> {
   const errors: Partial<Record<keyof Filters, string>> = {}
-  const lo = meta.available_start_date
-  const hi = meta.available_end_date
-  if (!DATE.test(f.start) || f.start < lo || f.start > hi) errors.start = `Choose a date in ${lo} – ${hi}`
-  if (!DATE.test(f.end) || f.end < lo || f.end > hi) errors.end = `Choose a date in ${lo} – ${hi}`
+  const lo = meta.decision_start_date
+  const hi = meta.decision_end_date
+  if (!DATE.test(f.start) || f.start < lo || f.start > hi) errors.start = `Decisions must be in ${lo} – ${hi}`
+  if (!DATE.test(f.end) || f.end < lo || f.end > hi) errors.end = `Decisions must be in ${lo} – ${hi}`
   if (!errors.start && !errors.end && f.end < f.start) errors.end = 'End must be on or after start'
-  if (f.mode === 'relative' && !HHMM.test(f.time)) errors.time = 'Use HH:MM (24h)'
-  if (f.mode === 'absolute' && !WALL.test(f.decision)) errors.decision = 'Enter a decision date and time'
+  if (!HHMM.test(f.time)) errors.time = 'Use HH:MM (24h)'
   return errors
 }
 
 export function toAnalysisParams(f: Filters): AnalysisParams {
-  const base = { start_date: f.start, end_date: f.end, cutoff_mode: f.mode }
-  return f.mode === 'absolute'
-    ? { ...base, decision_at: londonWallToUtcIso(f.decision) }
-    : { ...base, cutoff_day_offset: f.offset, cutoff_time: f.time }
+  return { decision_start_date: f.start, decision_end_date: f.end, cutoff_day_offset: f.offset, cutoff_time: f.time }
 }
 
 export function sameFilters(a: Filters, b: Filters): boolean {
   return (Object.keys(a) as (keyof Filters)[]).every((k) => a[k] === b[k])
 }
 
-/** Quick ranges within the available month: full month and four weeks (the last absorbs the remainder). */
+/** Quick decision-date ranges: full month and four weeks (the last absorbs the remainder). */
 export function rangePresets(meta: MetaResponse): { label: string; start: string; end: string }[] {
-  const lo = meta.available_start_date
-  const hi = meta.available_end_date
-  const presets = [{ label: 'Full month', start: lo, end: hi }]
+  const lo = meta.decision_start_date
+  const hi = meta.decision_end_date
+  const presets = [{ label: 'All of January', start: lo, end: hi }]
   for (let w = 0; w < 4; w++) {
     const start = addDays(lo, w * 7)
     if (start > hi) break
-    const end = w === 3 ? hi : addDays(start, 6) > hi ? hi : addDays(start, 6)
+    const end = w === 3 || addDays(start, 6) > hi ? hi : addDays(start, 6)
     presets.push({ label: `Week ${w + 1}`, start, end })
   }
   return presets
@@ -146,7 +137,8 @@ export function londonWallToUtcIso(wall: string): string {
   return new Date(utc).toISOString().replace('.000Z', 'Z')
 }
 
-/** Start (inclusive) and end (exclusive) of the selected London days, in UTC ms. */
+/** Start (inclusive) and end (exclusive) of the covered delivery days, in UTC ms. */
 export function periodBoundsUtc(f: Filters): [number, number] {
-  return [Date.parse(londonWallToUtcIso(`${f.start}T00:00`)), Date.parse(londonWallToUtcIso(`${addDays(f.end, 1)}T00:00`))]
+  const [ds, de] = deliveryDates(f)
+  return [Date.parse(londonWallToUtcIso(`${ds}T00:00`)), Date.parse(londonWallToUtcIso(`${addDays(de, 1)}T00:00`))]
 }

@@ -81,3 +81,36 @@ def test_summarize_with_nothing_matched():
     df = pd.DataFrame({"status": ["MISSING_FORECAST"], "forecast_mw": [np.nan], "actual_mw": [5.0], "abs_error_mw": [np.nan]})
     s = summarize(df)
     assert s.mae_mw is None and s.mean_forecast_mw is None and s.coverage_pct == 0
+
+
+# error range (distribution) used for planning
+def test_error_distribution_percentiles_and_ranges():
+    from app.services.accuracy import error_distribution
+
+    e = np.arange(-100, 101, dtype=float)  # -100..100, 201 values
+    d = error_distribution(e)
+    assert d["n"] == 201
+    assert d["percentiles_mw"]["p50"] == 0
+    assert d["percentiles_mw"]["p10"] == pytest.approx(-80) and d["percentiles_mw"]["p90"] == pytest.approx(80)
+    r80 = next(r for r in d["actual_ranges"] if r["coverage_pct"] == 80)
+    # actual = forecast - error, so the bounds flip sign
+    assert r80["low_mw"] == pytest.approx(-80) and r80["high_mw"] == pytest.approx(80)
+    assert sum(b["count"] for b in d["histogram"]) == 201
+    assert d["within"][0]["threshold_mw"] == 500 and d["within"][0]["pct"] == 100
+
+
+def test_error_distribution_skewed_over_forecast():
+    from app.services.accuracy import error_distribution
+
+    d = error_distribution([1000, 2000, 3000, -500, np.nan])
+    assert d["n"] == 4  # NaN excluded, not zero-filled
+    assert d["over_forecast_pct"] == 75
+    within_1000 = next(w for w in d["within"] if w["threshold_mw"] == 1000)
+    assert within_1000["pct"] == 50
+
+
+def test_error_distribution_empty_is_none():
+    from app.services.accuracy import error_distribution
+
+    assert error_distribution([]) is None
+    assert error_distribution([np.nan]) is None

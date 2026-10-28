@@ -4,7 +4,6 @@ export type IsoUtc = string
 export type IsoDate = string // yyyy-mm-dd (Europe/London calendar day)
 
 export type IntervalStatus = 'MATCHED' | 'MISSING_FORECAST' | 'MISSING_ACTUAL' | 'MISSING_BOTH'
-export type CutoffMode = 'relative' | 'absolute'
 
 export interface DataSourceInfo {
   mode: 'LIVE' | 'DEMO FIXTURE'
@@ -17,19 +16,20 @@ export interface DataSourceInfo {
 }
 
 export interface CutoffPolicy {
-  mode: CutoffMode
-  day_offset: number | null
-  local_time: string | null
-  decision_at_utc: IsoUtc | null
+  day_offset: number // decide this many days before delivery (1 = day-ahead)
+  local_time: string // HH:MM Europe/London
   timezone: string
   description: string
 }
 
+/** Scope is set by decision dates; delivery dates follow (decision + day_offset). */
 export interface Period {
-  start_date: IsoDate
-  end_date: IsoDate
-  start_utc: IsoUtc
-  end_utc: IsoUtc
+  decision_start_date: IsoDate
+  decision_end_date: IsoDate
+  delivery_start_date: IsoDate
+  delivery_end_date: IsoDate
+  start_utc: IsoUtc // start of first delivery day
+  end_utc: IsoUtc // exclusive end of last delivery day
 }
 
 export interface Metrics {
@@ -48,6 +48,18 @@ export interface Metrics {
   max_abs_error_mw: number | null
 }
 
+/** Empirical spread of error = forecast − actual over matched hours (in-sample, not a probabilistic forecast). */
+export interface ErrorDistribution {
+  n: number
+  percentiles_mw: Record<'p05' | 'p10' | 'p25' | 'p50' | 'p75' | 'p90' | 'p95', number>
+  /** Actual minus forecast bounds covering `coverage_pct` % of hours. */
+  actual_ranges: { coverage_pct: number; low_mw: number; high_mw: number }[]
+  within: { threshold_mw: number; pct: number }[]
+  over_forecast_pct: number
+  histogram: { low_mw: number; high_mw: number; count: number }[]
+  bin_width_mw: number
+}
+
 export interface DatasetInfo {
   actual_rows: number
   forecast_rows: number
@@ -61,8 +73,9 @@ export interface DatasetInfo {
 
 export interface MetaResponse {
   product: string
-  available_start_date: IsoDate
-  available_end_date: IsoDate
+  decision_start_date: IsoDate
+  decision_end_date: IsoDate
+  max_day_offset: number
   default_cutoff: CutoffPolicy
   analysis_resolution_minutes: number
   actual_resolution_minutes: number
@@ -82,6 +95,7 @@ export interface OverviewResponse {
   period: Period
   cutoff: CutoffPolicy
   metrics: Metrics
+  error_distribution: ErrorDistribution | null
   data_quality: DataQuality
   data_source: DataSourceInfo
 }
@@ -94,6 +108,8 @@ export interface TimeseriesPoint {
   actual_mw: number | null
   error_mw: number | null
   status: IntervalStatus
+  range_low_mw: number | null // central 80 % range for actual around the forecast
+  range_high_mw: number | null
 }
 
 export interface ActualPoint {
@@ -152,6 +168,7 @@ export interface ForecastVersion {
   forecast_mw: number
   eligible: boolean
   selected: boolean
+  ineligible_reason: 'AFTER_CUTOFF' | 'AFTER_DELIVERY_START' | null
   minutes_before_cutoff: number
   horizon_minutes: number
 }
@@ -178,10 +195,8 @@ export interface HealthResponse {
 
 /** Query parameters shared by all /api/analysis/* endpoints. */
 export interface AnalysisParams {
-  start_date: IsoDate
-  end_date: IsoDate
-  cutoff_mode: CutoffMode
-  cutoff_day_offset?: number
-  cutoff_time?: string // HH:MM Europe/London
-  decision_at?: string // ISO with offset (absolute mode)
+  decision_start_date: IsoDate
+  decision_end_date: IsoDate
+  cutoff_day_offset: number
+  cutoff_time: string // HH:MM Europe/London
 }

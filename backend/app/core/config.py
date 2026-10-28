@@ -1,6 +1,6 @@
 """Application settings, loaded from environment variables (and an optional .env file)."""
 
-from datetime import date, time
+from datetime import date, time, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -33,12 +33,25 @@ class Settings(BaseSettings):
     default_cutoff_day_offset: int = 1
     default_cutoff_time: time = time(9, 0)
 
-    # Delivery window the product supports.
-    analysis_start_date: date = date(2026, 1, 1)
-    analysis_end_date: date = date(2026, 1, 31)
-    # Forecasts published this many days before the first delivery day are downloaded too,
+    # Scope is defined by *decision* dates: purchase decisions made in January 2026.
+    # Delivery days follow from the cutoff policy (decision date + day offset).
+    decision_start_date: date = date(2026, 1, 1)
+    decision_end_date: date = date(2026, 1, 31)
+    # Largest supported "decide N days before delivery" (WINDFOR only reaches ~2 days ahead).
+    max_day_offset: int = 3
+    # Forecasts published this many days before the first decision day are downloaded too,
     # so early-January deliveries keep their December 2025 forecast history.
     forecast_publish_lookback_days: int = 8
+
+    @property
+    def delivery_start_date(self) -> date:
+        """Earliest delivery day any supported policy can reach (D-0 on the first decision day)."""
+        return self.decision_start_date
+
+    @property
+    def delivery_end_date(self) -> date:
+        """Latest delivery day any supported policy can reach."""
+        return self.decision_end_date + timedelta(days=self.max_day_offset)
 
     admin_token: str | None = None
 

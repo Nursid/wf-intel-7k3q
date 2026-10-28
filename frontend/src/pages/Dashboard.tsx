@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { ForecastActualChart } from '../components/charts/ForecastActualChart'
 import { AccuracyPanel } from '../components/dashboard/AccuracyPanel'
 import { DataQualityPanel } from '../components/dashboard/DataQualityPanel'
+import { ErrorRangePanel } from '../components/dashboard/ErrorRangePanel'
 import { KpiCards } from '../components/dashboard/KpiCards'
 import { SelectedInterval } from '../components/dashboard/SelectedInterval'
 import { FilterBar } from '../components/filters/FilterBar'
@@ -85,7 +86,11 @@ function Analysis({ meta, filters, at, onSelect }: AnalysisProps) {
       ) : (
         <Section
           title="Headline"
-          description={o ? `${formatDateRange(o.period.start_date, o.period.end_date)} · cutoff ${o.cutoff.description}` : undefined}
+          description={
+            o
+              ? `Decisions ${formatDateRange(o.period.decision_start_date, o.period.decision_end_date)} → deliveries ${formatDateRange(o.period.delivery_start_date, o.period.delivery_end_date)} · cutoff ${o.cutoff.description}`
+              : undefined
+          }
           action={
             o?.data_source.mode === 'DEMO FIXTURE' ? (
               <Badge tone="warn" dot>
@@ -111,6 +116,8 @@ function Analysis({ meta, filters, at, onSelect }: AnalysisProps) {
         />
         <AccuracyPanel className="xl:col-span-4" metrics={o?.metrics} />
       </div>
+
+      <ErrorRangePanel dist={o ? o.error_distribution : undefined} loading={overview.loading} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
         <IntervalTable key={key} className="xl:col-span-7" params={params} selected={selected} onSelect={onSelect} />

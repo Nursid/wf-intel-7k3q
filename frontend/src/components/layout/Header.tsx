@@ -27,7 +27,7 @@ export function Header({ periodLabel, dataSource, loading, unavailable }: Header
         </div>
 
         <dl className="flex flex-wrap items-center gap-x-6 gap-y-3 text-xs">
-          <HeaderItem icon={<CalendarRange className="size-4" aria-hidden />} label="Analysis period">
+          <HeaderItem icon={<CalendarRange className="size-4" aria-hidden />} label="Decision dates">
             {loading ? <Skeleton className="h-4 w-36" /> : (periodLabel ?? '—')}
           </HeaderItem>
 

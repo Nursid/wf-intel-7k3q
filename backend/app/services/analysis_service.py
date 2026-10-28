@@ -9,7 +9,7 @@ from datetime import date
 
 import pandas as pd
 
-from app.services.accuracy import AccuracyMetrics, summarize
+from app.services.accuracy import AccuracyMetrics, error_distribution, summarize
 from app.services.data_repository import DataRepository, Dataset
 from app.services.forecast_selector import (
     ANALYSIS_FREQ,
@@ -34,9 +34,15 @@ SORTABLE_COLUMNS = (
 
 @dataclass(frozen=True)
 class AnalysisQuery:
-    start_date: date
-    end_date: date
+    """Decisions taken on decision_start..decision_end (Europe/London) under `policy`."""
+
+    decision_start: date
+    decision_end: date
     policy: CutoffPolicy
+
+    @property
+    def delivery_dates(self) -> tuple[date, date]:
+        return self.policy.delivery_dates(self.decision_start, self.decision_end)
 
 
 @dataclass
@@ -44,6 +50,7 @@ class AnalysisResult:
     query: AnalysisQuery
     intervals: pd.DataFrame  # one row per expected hourly delivery interval
     metrics: AccuracyMetrics
+    distribution: dict | None  # error spread on matched intervals, see accuracy.error_distribution
     dataset: Dataset
 
 
@@ -62,10 +69,11 @@ class AnalysisService:
                 self._cache.move_to_end(key)
                 return self._cache[key]
 
-        grid = build_interval_grid(query.start_date, query.end_date, ANALYSIS_FREQ)
+        grid = build_interval_grid(*query.delivery_dates, ANALYSIS_FREQ)
         selected = select_forecasts(dataset.forecasts, grid, query.policy)
         intervals = match_intervals(selected, dataset.actuals)
-        result = AnalysisResult(query, intervals, summarize(intervals), dataset)
+        matched_errors = intervals.loc[intervals["status"] == "MATCHED", "error_mw"]
+        result = AnalysisResult(query, intervals, summarize(intervals), error_distribution(matched_errors), dataset)
 
         with self._lock:
             self._cache[key] = result
@@ -75,7 +83,7 @@ class AnalysisService:
 
     def half_hourly_actuals(self, query: AnalysisQuery) -> pd.DataFrame:
         a = self.repository.get().actuals
-        start, end = local_day_bounds_utc(query.start_date, query.end_date)
+        start, end = local_day_bounds_utc(*query.delivery_dates)
         return a[(a["start_time_utc"] >= start) & (a["start_time_utc"] < end)]
 
     def intervals_page(

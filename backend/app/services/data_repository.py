@@ -114,22 +114,24 @@ class DataRepository:
     def settlement_window(self) -> tuple:
         # Settlement dates are UK-local; pad by a day each side and trim on startTime later.
         s = self._settings
-        return s.analysis_start_date - timedelta(days=1), s.analysis_end_date + timedelta(days=1)
+        return s.delivery_start_date - timedelta(days=1), s.delivery_end_date + timedelta(days=1)
 
     def publish_window(self) -> tuple[datetime, datetime]:
+        # From well before the first decision (December history) to the end of the last delivery day,
+        # so the version history also shows forecasts published after the cutoff.
         s = self._settings
         start_local = datetime.combine(
-            s.analysis_start_date - timedelta(days=s.forecast_publish_lookback_days),
+            s.decision_start_date - timedelta(days=s.forecast_publish_lookback_days),
             datetime.min.time(),
             tzinfo=LONDON,
         )
-        end_local = datetime.combine(s.analysis_end_date + timedelta(days=1), datetime.min.time(), tzinfo=LONDON)
+        end_local = datetime.combine(s.delivery_end_date + timedelta(days=1), datetime.min.time(), tzinfo=LONDON)
         return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
     @property
     def cache_file(self) -> Path:
         s = self._settings
-        return Path(s.cache_dir) / f"elexon_wind_{s.analysis_start_date}_{s.analysis_end_date}.json"
+        return Path(s.cache_dir) / f"elexon_wind_decisions_{s.decision_start_date}_{s.decision_end_date}.json"
 
     # ------------------------------------------------------------------ public
 

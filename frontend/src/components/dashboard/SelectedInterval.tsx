@@ -77,7 +77,7 @@ function HistoryDetail({ h, loading }: { h: ForecastHistoryResponse; loading: bo
         <Fact label="Error (forecast − actual)" sub={sel ? `Forecast made ${formatDuration(sel.horizon_minutes)} ahead` : undefined}>
           <span className={isNum(error) ? (error > 0 ? 'text-over' : error < 0 ? 'text-under' : '') : ''}>{formatSignedMW(error)}</span>
         </Fact>
-        <Fact label="Eligible versions" sub={`${h.total_versions - h.eligible_versions} published after the cutoff`}>
+        <Fact label="Eligible versions" sub={`${h.total_versions - h.eligible_versions} published too late to use`}>
           {h.eligible_versions} of {h.total_versions}
         </Fact>
       </dl>
@@ -125,7 +125,7 @@ function HistoryChart({ h }: { h: ForecastHistoryResponse }) {
       <figcaption className="mb-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-muted">
         <span className="font-medium text-ink">Forecast by publication time</span>
         <Key color={C.forecast} label="Eligible" />
-        <Key color={C.late} label="After cutoff" dashed />
+        <Key color={C.late} label="Not usable (too late)" dashed />
         <Key color={C.actual} label="Actual" dashed />
       </figcaption>
       <div className="h-44" role="img" aria-label="Step chart of forecast versions by publication time; the version table below lists the values.">
@@ -161,7 +161,7 @@ function HistoryChart({ h }: { h: ForecastHistoryResponse }) {
                   <div className="rounded-lg border border-border bg-surface px-3 py-2 text-xs shadow-lg">
                     <p className="font-semibold">{formatMW(p.mw)}</p>
                     <p className="text-ink-muted">Published {formatLocal(new Date(p.t).toISOString())}</p>
-                    <p className={p.eligible ? 'text-ok' : 'text-ink-subtle'}>{p.eligible ? 'Before cutoff' : 'After cutoff (not used)'}</p>
+                    <p className={p.eligible ? 'text-ok' : 'text-ink-subtle'}>{p.eligible ? 'Usable at decision time' : 'Too late (not used)'}</p>
                   </div>
                 )
               }}
@@ -232,6 +232,10 @@ function VersionTable({ h }: { h: ForecastHistoryResponse }) {
                     <Badge tone="forecast">Selected</Badge>
                   ) : v.eligible ? (
                     <Badge tone="ok">Eligible</Badge>
+                  ) : v.ineligible_reason === 'AFTER_DELIVERY_START' ? (
+                    <Badge title="Published before the cutoff but after this hour began, so it is an observation rather than a forecast">
+                      After hour began
+                    </Badge>
                   ) : (
                     <Badge>After cutoff</Badge>
                   )}

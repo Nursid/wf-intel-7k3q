@@ -1,65 +1,94 @@
-Raw cache: 1584 actual half-hours, 22776 forecast rows
+Raw cache: 1728 actual half-hours, 24528 forecast rows
 
-Scenario start_date=2026-01-01&end_date=2026-01-31&cutoff_day_offset=1&cutoff_time=09:00
+Scenario decision_start_date=2026-01-01&decision_end_date=2026-01-31&cutoff_day_offset=1&cutoff_time=09:00
   [PASS] overview.matched_count - independent=744 api=744
   [PASS] overview.expected_count - independent=744 api=744
-  [PASS] overview.mae_mw - independent=2127.4825268817203 api=2127.4825268817203
-  [PASS] overview.rmse_mw - independent=2606.0679164624726 api=2606.0679164624726
-  [PASS] overview.mbe_mw - independent=1851.5282258064517 api=1851.5282258064517
-  [PASS] overview.wape_pct - independent=18.370277059375965 api=18.370277059375965
+  [PASS] overview.mae_mw - independent=2022.470430107527 api=2022.470430107527
+  [PASS] overview.rmse_mw - independent=2497.407157584179 api=2497.407157584179
+  [PASS] overview.mbe_mw - independent=1745.9381720430108 api=1745.9381720430108
+  [PASS] overview.wape_pct - independent=17.920953663925935 api=17.920953663925935
+  [PASS] error range P10/P90 - P10 -426 / P90 4154 MW
   [PASS] every interval matches independent selection - 744 intervals, 0 mismatches
   [PASS] no selected forecast published after its cutoff - 0 violations
+  [PASS] no selected forecast published after its hour began - 0 violations
+  [PASS] delivery period follows decision dates - decisions from 2026-01-01, deliveries from 2026-01-02
 
-Scenario start_date=2026-01-01&end_date=2026-01-31&cutoff_day_offset=0&cutoff_time=07:00
+Scenario decision_start_date=2026-01-01&decision_end_date=2026-01-31&cutoff_day_offset=0&cutoff_time=07:00
   [PASS] overview.matched_count - independent=744 api=744
   [PASS] overview.expected_count - independent=744 api=744
-  [PASS] overview.mae_mw - independent=1805.6760752688172 api=1805.6760752688172
-  [PASS] overview.rmse_mw - independent=2299.644202552502 api=2299.644202552502
-  [PASS] overview.mbe_mw - independent=1572.7325268817203 api=1572.7325268817203
-  [PASS] overview.wape_pct - independent=15.591559208147117 api=15.591559208147117
+  [PASS] overview.mae_mw - independent=1813.1505376344087 api=1813.1505376344087
+  [PASS] overview.rmse_mw - independent=2310.4944392409693 api=2310.4944392409693
+  [PASS] overview.mbe_mw - independent=1581.3225806451612 api=1581.3225806451612
+  [PASS] overview.wape_pct - independent=15.65609931260901 api=15.65609931260901
+  [PASS] error range P10/P90 - P10 -271 / P90 3781 MW
   [PASS] every interval matches independent selection - 744 intervals, 0 mismatches
   [PASS] no selected forecast published after its cutoff - 0 violations
+  [PASS] no selected forecast published after its hour began - 0 violations
+  [PASS] delivery period follows decision dates - decisions from 2026-01-01, deliveries from 2026-01-01
 
-Scenario start_date=2026-01-01&end_date=2026-01-31&cutoff_day_offset=2&cutoff_time=09:00
+Scenario decision_start_date=2026-01-01&decision_end_date=2026-01-31&cutoff_day_offset=0&cutoff_time=12:00
+  [PASS] overview.matched_count - independent=744 api=744
+  [PASS] overview.expected_count - independent=744 api=744
+  [PASS] overview.mae_mw - independent=1777.7930107526881 api=1777.7930107526881
+  [PASS] overview.rmse_mw - independent=2265.378775088982 api=2265.378775088982
+  [PASS] overview.mbe_mw - independent=1551.6935483870968 api=1551.6935483870968
+  [PASS] overview.wape_pct - independent=15.350795952066932 api=15.350795952066932
+  [PASS] error range P10/P90 - P10 -271 / P90 3679 MW
+  [PASS] every interval matches independent selection - 744 intervals, 0 mismatches
+  [PASS] no selected forecast published after its cutoff - 0 violations
+  [PASS] no selected forecast published after its hour began - 0 violations
+  [PASS] delivery period follows decision dates - decisions from 2026-01-01, deliveries from 2026-01-01
+
+Scenario decision_start_date=2026-01-01&decision_end_date=2026-01-31&cutoff_day_offset=2&cutoff_time=09:00
   [PASS] overview.matched_count - independent=682 api=682
   [PASS] overview.expected_count - independent=744 api=744
-  [PASS] overview.mae_mw - independent=2502.8064516129034 api=2502.8064516129034
-  [PASS] overview.rmse_mw - independent=3070.832699167387 api=3070.832699167387
-  [PASS] overview.mbe_mw - independent=1857.507331378299 api=1857.507331378299
-  [PASS] overview.wape_pct - independent=21.677721761122328 api=21.677721761122328
+  [PASS] overview.mae_mw - independent=2385.033724340176 api=2385.033724340176
+  [PASS] overview.rmse_mw - independent=2976.8807857571273 api=2976.8807857571273
+  [PASS] overview.mbe_mw - independent=1674.0513196480938 api=1674.0513196480938
+  [PASS] overview.wape_pct - independent=21.40041069598866 api=21.40041069598866
+  [PASS] error range P10/P90 - P10 -1415 / P90 5069 MW
   [PASS] every interval matches independent selection - 744 intervals, 0 mismatches
   [PASS] no selected forecast published after its cutoff - 0 violations
+  [PASS] no selected forecast published after its hour began - 0 violations
+  [PASS] delivery period follows decision dates - decisions from 2026-01-01, deliveries from 2026-01-03
 
-Scenario start_date=2026-01-01&end_date=2026-01-07&cutoff_day_offset=1&cutoff_time=16:00
+Scenario decision_start_date=2026-01-01&decision_end_date=2026-01-07&cutoff_day_offset=1&cutoff_time=16:00
   [PASS] overview.matched_count - independent=168 api=168
   [PASS] overview.expected_count - independent=168 api=168
-  [PASS] overview.mae_mw - independent=2183.9880952380954 api=2183.9880952380954
-  [PASS] overview.rmse_mw - independent=2607.779113491383 api=2607.779113491383
-  [PASS] overview.mbe_mw - independent=2008.654761904762 api=2008.654761904762
-  [PASS] overview.wape_pct - independent=16.93185908499386 api=16.93185908499386
+  [PASS] overview.mae_mw - independent=1781.8988095238096 api=1781.8988095238096
+  [PASS] overview.rmse_mw - independent=2130.4163032139986 api=2130.4163032139986
+  [PASS] overview.mbe_mw - independent=1520.482142857143 api=1520.482142857143
+  [PASS] overview.wape_pct - independent=15.70321372462107 api=15.70321372462107
+  [PASS] error range P10/P90 - P10 -386 / P90 3587 MW
   [PASS] every interval matches independent selection - 168 intervals, 0 mismatches
   [PASS] no selected forecast published after its cutoff - 0 violations
+  [PASS] no selected forecast published after its hour began - 0 violations
+  [PASS] delivery period follows decision dates - decisions from 2026-01-01, deliveries from 2026-01-02
 
-Scenario start_date=2026-01-15&end_date=2026-01-15&cutoff_day_offset=3&cutoff_time=09:00
+Scenario decision_start_date=2026-01-15&decision_end_date=2026-01-15&cutoff_day_offset=3&cutoff_time=09:00
   [PASS] overview.matched_count - independent=0 api=0
   [PASS] overview.expected_count - independent=24 api=24
   [PASS] overview.mae_mw - independent=None api=None
   [PASS] overview.rmse_mw - independent=None api=None
   [PASS] overview.mbe_mw - independent=None api=None
   [PASS] overview.wape_pct - independent=None api=None
+  [PASS] error range is null with no matched hours
   [PASS] every interval matches independent selection - 24 intervals, 0 mismatches
   [PASS] no selected forecast published after its cutoff - 0 violations
+  [PASS] no selected forecast published after its hour began - 0 violations
+  [PASS] delivery period follows decision dates - decisions from 2026-01-15, deliveries from 2026-01-18
 
 Spot checks via /forecast-history (default cutoff D-1 09:00)
-  [PASS] 01 Jan 06:00Z selected 31 Dec 07:30Z = 19264 MW (December publication) - eligible 11/24, actual 15363 MW
-  [PASS] 14 Jan 19:00Z selected 13 Jan 07:30Z = 12047 MW - eligible 11/24, actual 12439 MW
-  [PASS] 07 Jan 10:00Z selected 06 Jan 07:30Z = 14793 MW - eligible 11/24, actual 14908 MW
-  [PASS] 17 Jan 20:00Z selected 16 Jan 07:30Z = 5399 MW - eligible 11/24, actual 3762 MW
+  [PASS] 02 Jan 06:00Z selected 01 Jan 07:30Z = 18803 MW (decided 1 Jan) - eligible 11/24, actual 15328 MW
+  [PASS] 01 Feb 18:00Z selected 31 Jan 07:30Z = 5897 MW (decided 31 Jan) - eligible 11/24, actual 4812 MW
+  [PASS] 15 Jan 19:00Z selected 14 Jan 07:30Z = 9130 MW - eligible 11/24, actual 7631 MW
+  [PASS] 08 Jan 10:00Z selected 07 Jan 07:30Z = 3999 MW - eligible 11/24, actual 2112 MW
+  [PASS] 18 Jan 20:00Z selected 17 Jan 07:30Z = 8265 MW - eligible 11/24, actual 5746 MW
 
 Timings (warm cache)
-  [PASS] /api/analysis/overview < 2 s - 4 ms
-  [PASS] /api/analysis/timeseries < 2 s - 85 ms
-  [PASS] /api/analysis/intervals?page_size=500 < 2 s - 39 ms
-  [PASS] /api/analysis/overview?cutoff_time=10:15 < 2 s - 6 ms
+  [PASS] /api/analysis/overview < 2 s - 5 ms
+  [PASS] /api/analysis/timeseries < 2 s - 41 ms
+  [PASS] /api/analysis/intervals?page_size=500 < 2 s - 28 ms
+  [PASS] /api/analysis/overview?cutoff_time=10:15 < 2 s - 9 ms
 
 ALL CHECKS PASSED

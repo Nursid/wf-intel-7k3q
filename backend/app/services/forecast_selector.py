@@ -5,15 +5,17 @@ Three timestamps are kept distinct throughout:
 - publish time     (publish_time_utc): when a forecast became available
 - delivery start   (start_time_utc): the delivery interval being forecast
 
-Boundary rule: a forecast published exactly at the cutoff counts as eligible (publish <= cutoff).
-A forecast published after the cutoff is never selected, and there is no fallback to later forecasts.
+Eligibility: a forecast is usable for a delivery hour only if it was published
+  (a) at or before the decision cutoff (publish <= cutoff), and
+  (b) at or before the start of that delivery hour (publish <= start).
+Rule (b) matters for same-day cutoffs: WINDFOR runs also contain hours that have already started,
+and those values are observations rather than forecasts. Nothing ineligible is ever used as a fallback.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Literal
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -30,32 +32,27 @@ STATUS_MISSING_FORECAST = "MISSING_FORECAST"
 STATUS_MISSING_ACTUAL = "MISSING_ACTUAL"
 STATUS_MISSING_BOTH = "MISSING_BOTH"
 
+INELIGIBLE_AFTER_CUTOFF = "AFTER_CUTOFF"
+INELIGIBLE_AFTER_DELIVERY_START = "AFTER_DELIVERY_START"
+
 
 @dataclass(frozen=True)
 class CutoffPolicy:
-    """`relative`: cutoff = (delivery's Europe/London date - day_offset) at local_time, Europe/London.
-    `absolute`: one fixed decision timestamp for every interval.
+    """Decide `day_offset` days before the delivery day at `local_time` (Europe/London).
+
+    day_offset=1 is the day-ahead case: decide on day D for delivery on D+1.
     """
 
-    mode: Literal["relative", "absolute"] = "relative"
     day_offset: int = 1
     local_time: time = time(9, 0)
-    decision_at: datetime | None = None
 
     def __post_init__(self) -> None:
-        if self.mode == "absolute":
-            if self.decision_at is None:
-                raise ValueError("absolute cutoff requires decision_at")
-            if self.decision_at.tzinfo is None:
-                raise ValueError("decision_at must be timezone-aware")
-        elif self.day_offset < 0:
+        if self.day_offset < 0:
             raise ValueError("day_offset must be >= 0")
 
     def cutoff_for(self, delivery_start_utc: datetime) -> datetime:
         if delivery_start_utc.tzinfo is None:
             raise ValueError("delivery_start_utc must be timezone-aware")
-        if self.mode == "absolute":
-            return self.decision_at.astimezone(timezone.utc)  # type: ignore[union-attr]
         delivery_local_date = delivery_start_utc.astimezone(LONDON).date()
         decision_date = delivery_local_date - timedelta(days=self.day_offset)
         # zoneinfo resolves ambiguous wall times (autumn change) to the first occurrence (fold=0), and
@@ -63,9 +60,12 @@ class CutoffPolicy:
         cutoff_local = datetime.combine(decision_date, self.local_time, tzinfo=LONDON)
         return cutoff_local.astimezone(timezone.utc)
 
+    def delivery_dates(self, decision_start: date, decision_end: date) -> tuple[date, date]:
+        """Delivery days covered by decisions taken on decision_start..decision_end."""
+        shift = timedelta(days=self.day_offset)
+        return decision_start + shift, decision_end + shift
+
     def describe(self) -> str:
-        if self.mode == "absolute":
-            return f"Fixed decision time {self.decision_at.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC"  # type: ignore[union-attr]
         return f"D-{self.day_offset} at {self.local_time.strftime('%H:%M')} Europe/London"
 
 
@@ -87,24 +87,26 @@ def build_interval_grid(start_date: date, end_date: date, freq: pd.Timedelta = A
     return pd.date_range(start, end, freq=freq, inclusive="left", name="start_time_utc")
 
 
+def _eligible_mask(publish: pd.Series, cutoff, start) -> pd.Series:
+    return (publish <= cutoff) & (publish <= start)
+
+
 def select_forecasts(forecasts: pd.DataFrame, targets: pd.DatetimeIndex, policy: CutoffPolicy) -> pd.DataFrame:
-    """For each target interval pick the latest forecast published at or before its cutoff.
+    """For each target interval pick the latest eligible forecast (see module docstring).
 
     Returns one row per target with columns:
     start_time_utc, cutoff_utc, forecast_mw, publish_time_utc, eligible_versions, total_versions,
     lead_time_minutes (cutoff - publish), horizon_minutes (start - publish).
-    Targets without an eligible forecast get NaN/NaT, never a value from after the cutoff.
+    Targets without an eligible forecast get NaN/NaT.
     """
     out = pd.DataFrame({"start_time_utc": targets})
-    out["cutoff_utc"] = pd.to_datetime(
-        [policy.cutoff_for(t.to_pydatetime()) for t in targets], utc=True
-    ) if len(targets) else pd.Series([], dtype="datetime64[ns, UTC]")
+    out["cutoff_utc"] = pd.to_datetime([policy.cutoff_for(t.to_pydatetime()) for t in targets], utc=True)
 
     f = forecasts[forecasts["start_time_utc"].isin(targets)]
     f = f.merge(out[["start_time_utc", "cutoff_utc"]], on="start_time_utc", how="inner")
     total = f.groupby("start_time_utc").size().rename("total_versions")
 
-    eligible = f[f["publish_time_utc"] <= f["cutoff_utc"]]
+    eligible = f[_eligible_mask(f["publish_time_utc"], f["cutoff_utc"], f["start_time_utc"])]
     n_eligible = eligible.groupby("start_time_utc").size().rename("eligible_versions")
     latest = (
         eligible.sort_values(["start_time_utc", "publish_time_utc"])
@@ -137,10 +139,14 @@ def match_intervals(selected: pd.DataFrame, actuals: pd.DataFrame) -> pd.DataFra
 
 
 def forecast_versions(forecasts: pd.DataFrame, start_time_utc: pd.Timestamp, policy: CutoffPolicy) -> pd.DataFrame:
-    """All published versions for one delivery interval, flagged eligible/selected."""
+    """All published versions for one delivery interval, flagged eligible/selected with a reason if not."""
     cutoff = pd.Timestamp(policy.cutoff_for(start_time_utc.to_pydatetime()))
     v = forecasts[forecasts["start_time_utc"] == start_time_utc].sort_values("publish_time_utc").copy()
-    v["eligible"] = v["publish_time_utc"] <= cutoff
+    v["eligible"] = _eligible_mask(v["publish_time_utc"], cutoff, start_time_utc)
+    v["ineligible_reason"] = [
+        None if ok else (INELIGIBLE_AFTER_CUTOFF if p > cutoff else INELIGIBLE_AFTER_DELIVERY_START)
+        for ok, p in zip(v["eligible"], v["publish_time_utc"])
+    ]
     v["selected"] = False
     if v["eligible"].any():
         v.loc[v[v["eligible"]].index[-1], "selected"] = True

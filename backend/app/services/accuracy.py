@@ -69,6 +69,55 @@ def compute_metrics(forecast: np.ndarray | pd.Series, actual: np.ndarray | pd.Se
     }
 
 
+PERCENTILES = (5, 10, 25, 50, 75, 90, 95)
+WITHIN_THRESHOLDS_MW = (500, 1000, 2000, 3000)
+
+
+def _bin_width(span: float) -> float:
+    """A round histogram bin width giving roughly 15-35 bins."""
+    for w in (100, 250, 500, 1000, 2000, 5000):
+        if span / w <= 35:
+            return w
+    return 10_000
+
+
+def error_distribution(errors: np.ndarray | pd.Series) -> dict | None:
+    """Spread of error (forecast - actual) across matched intervals, for planning around the forecast.
+
+    `actual_ranges` restates percentiles as "actual relative to forecast" (= -error), e.g. the central
+    80 % range is actual in [forecast - P90(error), forecast - P10(error)].
+    These are empirical (in-sample) ranges for the selected period, not a probabilistic forecast.
+    """
+    e = np.asarray(errors, dtype="float64")
+    e = e[np.isfinite(e)]
+    if e.size == 0:
+        return None
+    pct = {p: float(np.percentile(e, p)) for p in PERCENTILES}
+    width = _bin_width(float(e.max() - e.min()) or 1.0)
+    lo = math.floor(e.min() / width) * width
+    hi = math.ceil(e.max() / width) * width
+    if hi == lo:
+        hi = lo + width
+    counts, edges = np.histogram(e, bins=np.arange(lo, hi + width, width))
+    return {
+        "n": int(e.size),
+        "percentiles_mw": {f"p{p:02d}": v for p, v in pct.items()},
+        "actual_ranges": [
+            {"coverage_pct": 50, "low_mw": -pct[75], "high_mw": -pct[25]},
+            {"coverage_pct": 80, "low_mw": -pct[90], "high_mw": -pct[10]},
+            {"coverage_pct": 90, "low_mw": -pct[95], "high_mw": -pct[5]},
+        ],
+        "within": [
+            {"threshold_mw": t, "pct": float((np.abs(e) <= t).mean() * 100)} for t in WITHIN_THRESHOLDS_MW
+        ],
+        "over_forecast_pct": float((e > 0).mean() * 100),
+        "histogram": [
+            {"low_mw": float(a), "high_mw": float(b), "count": int(c)} for a, b, c in zip(edges[:-1], edges[1:], counts)
+        ],
+        "bin_width_mw": width,
+    }
+
+
 def summarize(matched: pd.DataFrame) -> AccuracyMetrics:
     """Summarise a match_intervals() frame: metrics on MATCHED rows plus data-quality counts."""
     counts = matched["status"].value_counts()

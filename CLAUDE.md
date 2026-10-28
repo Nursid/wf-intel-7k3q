@@ -60,7 +60,9 @@ The app analyses historical forecasts. It must **not** claim to calculate optima
   The analysis grid is therefore **hourly**: each forecast hour is matched to the FUELHH actual with the same startTime. No interpolation.
   `/api/analysis/timeseries` returns `intervals` (hourly analysis rows) and `actuals_half_hourly` (context for the chart).
 - Each WINDFOR run reaches only about 2 days ahead, so D-2 cutoffs lose some intervals and D-3 loses all. That's expected, not a bug.
-- Boundary rule: publish_time == cutoff counts as eligible.
+- Scope = purchase **decisions** in January 2026 (client brief). Delivery = decision + day_offset (D-1 → 2 Jan – 1 Feb). There is no "fixed decision time" mode any more.
+- Eligibility: publish <= cutoff AND publish <= delivery start (equality is eligible). History rows carry ineligible_reason.
+- Error range = empirical percentiles of forecast − actual. The 80 % band for actual is [f − P90, f − P10], floored at 0.
 - Missing counts are inclusive (missing_forecast_count includes MISSING_BOTH).
 - Dev machine: Windows Application Control blocks pandas 3.x DLLs, so pandas is pinned `<3`. Python runs through `py` / `backend/.venv`.
 - Port 5173 is used by another local app on the dev machine. Use `npx vite --port 5174` and add that origin to `CORS_ORIGINS` if needed.

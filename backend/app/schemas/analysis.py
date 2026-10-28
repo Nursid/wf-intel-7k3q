@@ -21,19 +21,19 @@ class DataSourceInfo(BaseModel):
 
 
 class CutoffPolicyOut(BaseModel):
-    mode: Literal["relative", "absolute"]
-    day_offset: int | None
-    local_time: str | None = Field(description="HH:MM in Europe/London (relative mode)")
-    decision_at_utc: datetime | None
+    day_offset: int = Field(description="Decide this many days before the delivery day (1 = day-ahead)")
+    local_time: str = Field(description="Decision time, HH:MM Europe/London")
     timezone: str = "Europe/London"
     description: str
 
 
 class Period(BaseModel):
-    start_date: date = Field(description="First delivery day (Europe/London)")
-    end_date: date = Field(description="Last delivery day (Europe/London, inclusive)")
-    start_utc: datetime
-    end_utc: datetime = Field(description="Exclusive end")
+    decision_start_date: date = Field(description="First decision day (Europe/London)")
+    decision_end_date: date = Field(description="Last decision day (Europe/London, inclusive)")
+    delivery_start_date: date = Field(description="First delivery day = first decision day + day_offset")
+    delivery_end_date: date = Field(description="Last delivery day (inclusive)")
+    start_utc: datetime = Field(description="Start of the first delivery day")
+    end_utc: datetime = Field(description="Exclusive end of the last delivery day")
 
 
 class Metrics(BaseModel):
@@ -50,6 +50,35 @@ class Metrics(BaseModel):
     mean_forecast_mw: float | None
     mean_actual_mw: float | None
     max_abs_error_mw: float | None
+
+
+class ActualRange(BaseModel):
+    coverage_pct: int = Field(description="Share of matched hours the range covers, e.g. 80")
+    low_mw: float = Field(description="Actual minus forecast at the lower bound (negative = below forecast)")
+    high_mw: float = Field(description="Actual minus forecast at the upper bound")
+
+
+class WithinThreshold(BaseModel):
+    threshold_mw: int
+    pct: float = Field(description="Share of matched hours with |error| <= threshold")
+
+
+class HistogramBin(BaseModel):
+    low_mw: float
+    high_mw: float
+    count: int
+
+
+class ErrorDistribution(BaseModel):
+    """Empirical spread of error = forecast - actual over the matched hours of the selected period."""
+
+    n: int
+    percentiles_mw: dict[str, float] = Field(description="p05..p95 of forecast - actual")
+    actual_ranges: list[ActualRange]
+    within: list[WithinThreshold]
+    over_forecast_pct: float = Field(description="Share of hours where forecast exceeded actual")
+    histogram: list[HistogramBin]
+    bin_width_mw: float
 
 
 class DatasetInfo(BaseModel):
@@ -72,8 +101,9 @@ class DataQuality(BaseModel):
 
 class MetaResponse(BaseModel):
     product: str
-    available_start_date: date
-    available_end_date: date
+    decision_start_date: date = Field(description="Supported decision dates: purchase decisions in January 2026")
+    decision_end_date: date
+    max_day_offset: int
     default_cutoff: CutoffPolicyOut
     analysis_resolution_minutes: int
     actual_resolution_minutes: int
@@ -86,6 +116,7 @@ class OverviewResponse(BaseModel):
     period: Period
     cutoff: CutoffPolicyOut
     metrics: Metrics
+    error_distribution: ErrorDistribution | None = Field(description="null when no hour is matched")
     data_quality: DataQuality
     data_source: DataSourceInfo
 
@@ -98,6 +129,8 @@ class TimeseriesPoint(BaseModel):
     actual_mw: float | None
     error_mw: float | None
     status: IntervalStatus
+    range_low_mw: float | None = Field(description="Lower bound of the central 80 % range for actual: max(0, forecast - P90 error)")
+    range_high_mw: float | None = Field(description="Upper bound (forecast - P10 error)")
 
 
 class ActualPoint(BaseModel):
@@ -146,6 +179,7 @@ class ForecastVersion(BaseModel):
     forecast_mw: float
     eligible: bool
     selected: bool
+    ineligible_reason: Literal["AFTER_CUTOFF", "AFTER_DELIVERY_START"] | None = None
     minutes_before_cutoff: float = Field(description="cutoff - publish time; negative = published after cutoff")
     horizon_minutes: float = Field(description="delivery start - publish time")
 
